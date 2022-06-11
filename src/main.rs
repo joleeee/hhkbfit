@@ -18,7 +18,7 @@ struct KeyboardInfo {
     serial: String,
     app_firm_version: String,
     boot_firm_version: String,
-    running_firmware: bool,
+    running_firmware: RunningFirmware,
 }
 
 impl std::convert::TryFrom<u8> for KeyboardMode {
@@ -33,6 +33,26 @@ impl std::convert::TryFrom<u8> for KeyboardMode {
         }
     }
 }
+
+#[repr(u8)]
+#[derive(Debug)]
+enum RunningFirmware {
+    AppFirmware = 0,
+    BootFirmware = 1,
+}
+
+impl std::convert::TryFrom<u8> for RunningFirmware {
+    type Error = ();
+
+    fn try_from(v: u8) -> Result<Self, Self::Error> {
+        match v {
+            x if x == RunningFirmware::AppFirmware as u8 => Ok(RunningFirmware::AppFirmware),
+            x if x == RunningFirmware::BootFirmware as u8 => Ok(RunningFirmware::BootFirmware),
+            _ => Err(()),
+        }
+    }
+}
+
 
 struct HhkB {
     dev: hidapi::HidDevice,
@@ -114,31 +134,31 @@ impl HhkB {
             .send(&[0x00, 0xAA, 0xAA, 0x02], &[85, 85, 2, 0, 0 /*, 48*/])
             .unwrap();
 
-        let mut idx = 6;
-
-        let mut cut = |len: usize| {
-            let vec = buf[idx..idx + len].to_vec();
-            idx += len;
-            vec
-        };
-
         fn s_enc(vec: Vec<u8>) -> String {
             String::from_utf8(vec).unwrap().replace(char::from(0), "")
         }
 
         fn ver_enc(vec: &[u8]) -> String {
-            assert_eq!(vec.len(), 4);
-
             format!("{:X}{}.{}{}", vec[0], vec[1], vec[2], vec[3])
         }
 
+        let type_number = s_enc(buf[6..26].to_vec());
+        let revision = s_enc(buf[26..30].to_vec());
+        let serial = s_enc(buf[30..46].to_vec());
+
+        // ignore last 4 bytes
+        let app_firm_version = ver_enc(&buf[46..50]); // 46..54
+        let boot_firm_version = ver_enc(&buf[54..58]); // 54..62
+
+        let running_firmware = buf[62].try_into().unwrap();
+
         KeyboardInfo {
-            type_number: s_enc(cut(20)),
-            revision: s_enc(cut(4)),
-            serial: s_enc(cut(16)),
-            app_firm_version: ver_enc(&cut(8)[..4]),
-            boot_firm_version: ver_enc(&cut(8)[..4]),
-            running_firmware: buf[idx] == 1,
+            type_number,
+            revision,
+            serial,
+            app_firm_version,
+            boot_firm_version,
+            running_firmware,
         }
     }
 }
